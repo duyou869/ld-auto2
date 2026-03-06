@@ -290,8 +290,8 @@ class LinuxDoBrowser:
         if not topic_list:
             logger.error(f"[{self.account_label}] 未找到主题帖")
             return False
-        logger.info(f"[{self.account_label}] 发现 {len(topic_list)} 个主题帖，随机选择10个")
-        for topic in random.sample(topic_list, 10):
+        logger.info(f"[{self.account_label}] 发现 {len(topic_list)} 个主题帖，随机选择1个")
+        for topic in random.sample(topic_list, 1):
             self.click_one_topic(topic.attr("href"))
         return True
 
@@ -364,8 +364,8 @@ class LinuxDoBrowser:
                     logger.error(f"[{self.account_label}] 点击主题失败，程序终止")
                     return False
                 logger.info(f"[{self.account_label}] 完成浏览任务")
-            self.print_connect_info()  # 打印连接信息
-            self.send_notifications(BROWSE_ENABLED)  # 发送通知
+            connect_info = self.get_connect_info()  # 获取连接信息
+            self.send_notifications(BROWSE_ENABLED, connect_info)  # 发送通知
             logger.info(f"========== 账号 {self.account_label} 执行完毕 ==========")
             return True
         finally:
@@ -392,34 +392,92 @@ class LinuxDoBrowser:
         except Exception as e:
             logger.error(f"[{self.account_label}] 点赞失败: {str(e)}")
 
-    def print_connect_info(self):
+    def get_connect_info(self):
+        """使用浏览器获取 connect.linux.do 等级信息（JS 渲染页面）"""
         logger.info(f"[{self.account_label}] 获取连接信息")
-        headers = {
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
-        }
-        resp = self.session.get(
-            "https://connect.linux.do/", headers=headers, impersonate="chrome136"
-        )
-        soup = BeautifulSoup(resp.text, "html.parser")
-        rows = soup.select("table tr")
-        info = []
+        connect_page = None
+        try:
+            connect_page = self.browser.new_tab()
+            connect_page.get("https://connect.linux.do/")
+            time.sleep(5)
 
-        for row in rows:
-            cells = row.select("td")
-            if len(cells) >= 3:
-                project = cells[0].text.strip()
-                current = cells[1].text.strip() if cells[1].text.strip() else "0"
-                requirement = cells[2].text.strip() if cells[2].text.strip() else "0"
-                info.append([project, current, requirement])
+            info = []
 
-        logger.info(f"[{self.account_label}] --------------Connect Info-----------------")
-        logger.info("\n" + tabulate(info, headers=["项目", "当前", "要求"], tablefmt="pretty"))
+            # 解析标题和状态（如 "信任级别 3 的要求" / "已达到"）
+            try:
+                title_ele = connect_page.ele(".card-title")
+                badge_ele = connect_page.ele(".badge")
+                if title_ele and badge_ele:
+                    self.trust_level_title = title_ele.text.strip()
+                    self.trust_level_status = badge_ele.text.strip()
+                    logger.info(f"[{self.account_label}] {self.trust_level_title}: {self.trust_level_status}")
+            except Exception:
+                self.trust_level_title = ""
+                self.trust_level_status = ""
 
-    def send_notifications(self, browse_enabled):
-        """发送签到通知"""
+            # 活跃程度：.tl3-ring 内含 .tl3-ring-current / .tl3-ring-target / .tl3-ring-label
+            for ring in connect_page.eles(".tl3-ring"):
+                try:
+                    label = ring.ele(".tl3-ring-label").text.strip()
+                    current = ring.ele(".tl3-ring-current").text.strip()
+                    target = ring.ele(".tl3-ring-target").text.replace("/", "").strip()
+                    info.append([label, current, target])
+                except Exception:
+                    pass
+
+            # 互动参与：.tl3-bar-item 内含 .tl3-bar-label / .tl3-bar-nums
+            for bar in connect_page.eles(".tl3-bar-item"):
+                try:
+                    label = bar.ele(".tl3-bar-label").text.strip()
+                    nums = bar.ele(".tl3-bar-nums").text.strip()
+                    parts = nums.split("/")
+                    if len(parts) == 2:
+                        info.append([label, parts[0].strip(), parts[1].strip()])
+                except Exception:
+                    pass
+
+            # 合规记录：.tl3-quota-card 内含 .tl3-quota-label / .tl3-quota-nums
+            for quota in connect_page.eles(".tl3-quota-card"):
+                try:
+                    label = quota.ele(".tl3-quota-label").text.strip()
+                    nums = quota.ele(".tl3-quota-nums").text.strip()
+                    parts = nums.split("/")
+                    if len(parts) == 2:
+                        info.append([label, parts[0].strip(), parts[1].strip()])
+                except Exception:
+                    pass
+
+            logger.info(f"[{self.account_label}] --------------Connect Info-----------------")
+            if info:
+                logger.info("\n" + tabulate(info, headers=["项目", "当前", "要求"], tablefmt="pretty"))
+            else:
+                logger.warning(f"[{self.account_label}] 未获取到等级信息（新号可能为空）")
+            return info
+        except Exception as e:
+            logger.error(f"[{self.account_label}] 获取连接信息失败: {str(e)}")
+            return []
+        finally:
+            try:
+                if connect_page:
+                    connect_page.close()
+            except Exception:
+                pass
+
+    def send_notifications(self, browse_enabled, connect_info):
+        """发送签到通知，包含等级信息"""
         status_msg = f"✅每日登录成功: {self.account_label}"
         if browse_enabled:
             status_msg += " + 浏览任务完成"
+
+        if hasattr(self, "trust_level_title") and self.trust_level_title:
+            status_msg += f"\n\n📋 <b>{self.trust_level_title}</b>: {self.trust_level_status}"
+
+        if connect_info:
+            status_msg += "\n\n📊 <b>等级信息</b>\n"
+            for project, current, requirement in connect_info:
+                status_msg += f"  {project}: {current} / {requirement}\n"
+        else:
+            status_msg += "\n\n📊 未获取到信息或等级未到2级以上"
 
         # 使用通知管理器发送所有通知
         self.notifier.send_all("LINUX DO", status_msg)
