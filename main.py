@@ -48,6 +48,7 @@ BROWSE_ENABLED = os.environ.get("BROWSE_ENABLED", "true").strip().lower() not in
     "0",
     "off",
 ]
+SOCKS5_PROXY = os.environ.get("SOCKS5_PROXY", "").strip()  # 如 socks5://user:pass@host:port
 
 HOME_URL = "https://linux.do/"
 LOGIN_URL = "https://linux.do/login"
@@ -119,12 +120,20 @@ class LinuxDoBrowser:
             .incognito(True)
             .set_argument("--no-sandbox")
         )
+        if SOCKS5_PROXY:
+            co.set_argument(f"--proxy-server={SOCKS5_PROXY}")
+            logger.info(f"[{self.account_label}] 使用代理: {SOCKS5_PROXY}")
         co.set_user_agent(
             f"Mozilla/5.0 ({platformIdentifier}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
         )
         self.browser = Chromium(co)
         self.page = self.browser.new_tab()
         self.session = requests.Session()
+        if SOCKS5_PROXY:
+            self.session.proxies = {
+                "http": SOCKS5_PROXY,
+                "https": SOCKS5_PROXY,
+            }
         self.session.headers.update(
             {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36 Edg/142.0.0.0",
