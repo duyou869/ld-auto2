@@ -508,12 +508,39 @@ def run_account(account, index, total):
         return False
 
 
+def check_proxy():
+    """检测代理连通性，输出当前出口 IP"""
+    if not SOCKS5_PROXY:
+        logger.info("未配置代理，使用直连")
+        return True
+
+    logger.info(f"检测代理连通性: {SOCKS5_PROXY}")
+    try:
+        resp = requests.get(
+            "https://api.ipify.org?format=json",
+            proxies={"http": SOCKS5_PROXY, "https": SOCKS5_PROXY},
+            impersonate="chrome136",
+            timeout=15,
+        )
+        ip = resp.json().get("ip", "未知")
+        logger.info(f"代理连通正常，出口 IP: {ip}")
+        return True
+    except Exception as e:
+        logger.error(f"代理连接失败: {str(e)}")
+        logger.error("请检查 SOCKS5_PROXY 格式（如 socks5://user:pass@host:port）和代理服务器状态")
+        return False
+
+
 if __name__ == "__main__":
     accounts = parse_accounts()
     if not accounts:
         print("未检测到任何账号配置。")
         print("请设置 LINUXDO_COOKIES（Cookie 登录，多账号用 # 分隔），")
         print("或同时设置 LINUXDO_USERNAME 和 LINUXDO_PASSWORD（账号密码登录，多账号用 # 分隔）")
+        exit(1)
+
+    if not check_proxy():
+        logger.error("代理不可用，程序终止")
         exit(1)
 
     logger.info(f"共检测到 {len(accounts)} 个账号，最大并发数: {MAX_WORKERS}")
