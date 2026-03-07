@@ -36,6 +36,7 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           LINUXDO_COOKIES: ${{ secrets.LINUXDO_COOKIES }}
           BROWSE_ENABLED: ${{ secrets.BROWSE_ENABLED }}
+          SOCKS5_PROXY: ${{ secrets.SOCKS5_PROXY }}
         run: |
           python main.py
 
